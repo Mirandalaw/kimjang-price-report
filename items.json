@@ -1,14 +1,78 @@
 {
-  "_설명": "김장 재료 목록. category: 200 채소류 / 300 특용작물 / 600 수산물. match_item·match_kind는 KAMIS 응답의 item_name·kind_name에 포함되는 글자. qty+qty_unit은 우리 집 김장 기준 수량(4인 가족 배추 20포기 기준 예시값이니 부모님 댁 기준으로 고치세요). buy: now=9~10월에 미리 사는 재료, later=11월 김장 직전에 사는 재료. 첫 실행 전 `python kimjang_report.py codes`로 실제 이름을 확인하고 맞추세요.",
+  "_설명": "김장 재료 목록. category: 200 채소류 / 300 특용작물 / 600 수산물. match_item은 KAMIS 품목(item_name), match_kind는 품종(kind_name)에 포함되는 글자. 예: 쪽파는 품목 \"파\"·품종 \"쪽파(1kg)\". 나머지 설명: KAMIS 응답의 item_name·kind_name에 포함되는 글자. qty+qty_unit은 우리 집 김장 기준 수량(4인 가족 배추 20포기 기준 예시값이니 부모님 댁 기준으로 고치세요). buy: now=9~10월에 미리 사는 재료, later=11월 김장 직전에 사는 재료. 첫 실행 전 `python kimjang_report.py codes`로 실제 이름을 확인하고 맞추세요.",
   "family": "4인 가족 · 배추 20포기",
   "items": [
-    {"name": "배추",     "category": "200", "match_item": "배추",   "match_kind": "",     "qty": 20,   "qty_unit": "포기", "buy": "later"},
-    {"name": "무",       "category": "200", "match_item": "무",     "match_kind": "",     "qty": 10,   "qty_unit": "개",   "buy": "later"},
-    {"name": "쪽파",     "category": "200", "match_item": "쪽파",   "match_kind": "",     "qty": 2400, "qty_unit": "g",    "buy": "later"},
-    {"name": "대파",     "category": "200", "match_item": "대파",   "match_kind": "",     "qty": 2000, "qty_unit": "g",    "buy": "later"},
-    {"name": "생강",     "category": "200", "match_item": "생강",   "match_kind": "",     "qty": 120,  "qty_unit": "g",    "buy": "later"},
-    {"name": "깐마늘",   "category": "200", "match_item": "마늘",   "match_kind": "깐마늘", "qty": 1200, "qty_unit": "g",    "buy": "now"},
-    {"name": "고춧가루", "category": "200", "match_item": "고춧가루", "match_kind": "",   "qty": 1860, "qty_unit": "g",    "buy": "now"},
-    {"name": "새우젓",   "category": "600", "match_item": "새우젓", "match_kind": "",     "qty": 1000, "qty_unit": "g",    "buy": "now"}
+    {
+      "name": "배추",
+      "category": "200",
+      "match_item": "배추",
+      "match_kind": "",
+      "qty": 20,
+      "qty_unit": "포기",
+      "buy": "later"
+    },
+    {
+      "name": "무",
+      "category": "200",
+      "match_item": "무",
+      "match_kind": "",
+      "qty": 10,
+      "qty_unit": "개",
+      "buy": "later"
+    },
+    {
+      "name": "쪽파",
+      "category": "200",
+      "match_item": "파",
+      "match_kind": "쪽파",
+      "qty": 2400,
+      "qty_unit": "g",
+      "buy": "later"
+    },
+    {
+      "name": "대파",
+      "category": "200",
+      "match_item": "파",
+      "match_kind": "대파",
+      "qty": 2000,
+      "qty_unit": "g",
+      "buy": "later"
+    },
+    {
+      "name": "생강",
+      "category": "200",
+      "match_item": "생강",
+      "match_kind": "국산",
+      "qty": 120,
+      "qty_unit": "g",
+      "buy": "later"
+    },
+    {
+      "name": "깐마늘",
+      "category": "200",
+      "match_item": "마늘",
+      "match_kind": "깐마늘",
+      "qty": 1200,
+      "qty_unit": "g",
+      "buy": "now"
+    },
+    {
+      "name": "고춧가루",
+      "category": "200",
+      "match_item": "고춧가루",
+      "match_kind": "국산",
+      "qty": 1860,
+      "qty_unit": "g",
+      "buy": "now"
+    },
+    {
+      "name": "새우젓",
+      "category": "600",
+      "match_item": "새우젓",
+      "match_kind": "",
+      "qty": 1000,
+      "qty_unit": "g",
+      "buy": "now"
+    }
   ]
 }

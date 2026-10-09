@@ -52,12 +52,18 @@ def fetch_category(category, regday, fixture=None):
     return [items] if isinstance(items, dict) else list(items)
 
 
-def latest_business_day(target, categories, fixture=None, max_back=7):
-    """주말·공휴일엔 가격이 없으므로 데이터가 있는 가장 가까운 과거 날짜를 찾는다."""
+def latest_business_day(target, categories, fixture=None, max_back=10, ok=None):
+    """주말·공휴일엔 가격이 없으므로 쓸 만한 데이터가 있는 가장 가까운 과거 날짜를 찾는다.
+    KAMIS는 공휴일에도 품목 목록은 주고 가격만 '-'로 비우므로, 목록 유무가 아니라
+    ok(rows) 판정(기본: 숫자 가격이 하나라도 있는지)으로 고른다."""
+    if ok is None:
+        ok = lambda rows: any(num(r.get("dpr1")) is not None for rs in rows.values() for r in rs)
     for back in range(max_back + 1):
         day = target - dt.timedelta(days=back)
         rows = {c: fetch_category(c, day.isoformat(), fixture) for c in categories}
-        if any(rows.values()):
+        if ok(rows):
+            if back:
+                print(f"{target}에 가격이 없어 {day} 가격을 씁니다.", file=sys.stderr)
             return day, rows
     sys.exit(f"{target} 이전 {max_back}일 동안 가격 데이터가 없습니다.")
 
@@ -217,7 +223,9 @@ def cmd_report(args):
     cfg = json.loads((BASE / "items.json").read_text(encoding="utf-8"))
     cats = sorted({i["category"] for i in cfg["items"]})
     day = dt.date.fromisoformat(args.date) if args.date else dt.date.today()
-    day, rows = latest_business_day(day, cats, args.fixture)
+    half = len(cfg["items"]) / 2
+    enough = lambda rows: sum(1 for r in build(cfg["items"], rows) if r["found"]) >= half
+    day, rows = latest_business_day(day, cats, args.fixture, ok=enough)
     recs = build(cfg["items"], rows)
     msg = render(day, cfg.get("family", ""), recs)
     save(day, recs, msg, Path(args.out))
@@ -225,6 +233,11 @@ def cmd_report(args):
     for r in recs:
         if r.get("error"):
             print(f"[확인 필요] {r['name']}: {r['error']}", file=sys.stderr)
+    found = sum(1 for r in recs if r["found"])
+    if found < len(recs) / 2:
+        print(f"[발송 중단] 재료 {len(recs)}개 중 {found}개만 찾음. "
+              f"`python3 kimjang_report.py codes` 결과와 items.json을 맞추세요.", file=sys.stderr)
+        return
     if not args.no_send:
         for r in notify.send_all(msg, f"김장 물가 알리미 {day}"):
             print(r, file=sys.stderr)
