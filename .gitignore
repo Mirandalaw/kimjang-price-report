@@ -1,0 +1,10 @@
+# 인증 정보는 절대 커밋하지 않는다
+.env
+*.env
+.kamis.env
+
+# 실행 결과 (보고서용 로그는 따로 백업)
+data/
+__pycache__/
+*.pyc
+.DS_Store
