@@ -189,13 +189,13 @@ def render(day, family, recs):
 
 
 # ---------- 알림톡 템플릿 변수 ----------
-def signed_pct(a, b, none="-"):
-    """'+3%' / '-2%' / '0%'. 비교값이 없으면 none."""
+def signed_pct(a, b, none="자료 없음"):
+    """'+3%' / '-2%' / '변동 없음'. 비교값이 없으면 none (알림톡에서 '-' 한 글자는 뜻이 안 보여서 말로 쓴다)."""
     p = pct(a, b)
     if p is None:
         return none
     r = round(p)
-    return "0%" if r == 0 else f"{'+' if r > 0 else ''}{r}%"
+    return "변동 없음" if r == 0 else f"{'+' if r > 0 else ''}{r}%"
 
 
 def next_send_day(today=None, weekday=0):
@@ -213,7 +213,7 @@ def template_vars(day, cfg, recs):
       슬롯 1~3 (지금 사는 재료): #{수량n} #{금액n} #{평년비n} #{주간비n}
       슬롯 4~5 (11월 재료):      #{수량n} #{금액n} #{주간비n}
       #{기타요약} #{미조사품목} #{다음발송일}
-    슬롯 ↔ 재료 대응은 items.json 의 alimtalk.slots(1~3) / later_slots(4~5). 가격이 없는 재료는 '-' 로 채우고 미조사품목에 이름을 적는다.
+    슬롯 ↔ 재료 대응은 items.json 의 alimtalk.slots(1~3) / later_slots(4~5). 가격이 없는 재료는 '가격 없음'·'자료 없음'으로 채우고 미조사품목에 이름을 적는다.
     템플릿에 없는 변수는 보내지 않는다(4~5 는 평년비 없음).
     """
     by = {r["name"]: r for r in recs}
@@ -222,7 +222,7 @@ def template_vars(day, cfg, recs):
     v = {
         "기준일": f"{day.month}/{day.day}({WEEKDAY[day.weekday()]})",
         "가족기준": cfg.get("family", ""),
-        "총액": won(sum(r["now_cost"] for r in ok)) if ok else "-",
+        "총액": won(sum(r["now_cost"] for r in ok)) if ok else "자료 없음",
         "주간증감": signed_pct(*total(recs, "week")),
         "연간증감": signed_pct(*total(recs, "year")),
     }
@@ -231,16 +231,15 @@ def template_vars(day, cfg, recs):
             r = by.get(name)
             found = r is not None and r["found"]
             v[f"수량{n}"] = qty_text(r) if r else "-"
-            v[f"금액{n}"] = won(r["now_cost"]) if found else "-"
-            v[f"주간비{n}"] = signed_pct(r["now"], r["week"]) if found else "-"
+            v[f"금액{n}"] = won(r["now_cost"]) if found else "가격 없음"
+            v[f"주간비{n}"] = signed_pct(r["now"], r["week"]) if found else "자료 없음"
             if with_normal:
-                v[f"평년비{n}"] = signed_pct(r["now"], r["normal"]) if found else "-"
+                v[f"평년비{n}"] = signed_pct(r["now"], r["normal"]) if found else "자료 없음"
     etc = []
     for name in a.get("etc", []):
         r = by.get(name)
         if r and r["found"]:
-            t = signed_pct(r["now"], r["week"])
-            etc.append(f"{name} {won(r['now_cost'])}" + (f"({t})" if t != "-" else ""))
+            etc.append(f"{name} {won(r['now_cost'])}")
     v["기타요약"] = " · ".join(etc) if etc else "이번 주 가격 없음"
     missing = [r["name"] for r in recs if not r["found"]]
     v["미조사품목"] = ", ".join(missing) if missing else "없음"
@@ -287,7 +286,31 @@ def _collect(args):
     half = len(cfg["items"]) / 2
     enough = lambda rows: sum(1 for r in build(cfg["items"], rows) if r["found"]) >= half
     day, rows = latest_business_day(day, cats, args.fixture, ok=enough)
-    return cfg, day, build(cfg["items"], rows)
+    recs = build(cfg["items"], rows)
+    fill_week(recs, cfg["items"], day, cats, args.fixture)
+    return cfg, day, recs
+
+
+def fill_week(recs, specs, day, cats, fixture=None):
+    """KAMIS 의 '1주일 전' 칸(dpr3)은 그날이 공휴일이면 비어 있다(예: 10/16 기준 → 10/9 한글날).
+    비어 있는 재료만, 7일 전부터 거슬러 올라가 가격이 있는 가장 가까운 영업일의 당일 가격으로 채운다.
+    rec['week_from'] 에 실제 비교일을 남긴다."""
+    need = [r for r in recs if r["found"] and r.get("week") is None]
+    if not need:
+        return
+    target = day - dt.timedelta(days=7)
+    for back in range(0, 6):
+        d = target - dt.timedelta(days=back)
+        rows = {c: fetch_category(c, d.isoformat(), fixture) for c in cats}
+        prev = {b["name"]: b for b in build(specs, rows)}
+        for r in list(need):
+            p = prev.get(r["name"])
+            if p and p["found"] and p.get("now") is not None:
+                factor = r["now_cost"] / r["now"] if r["now"] else 0
+                r["week"], r["week_cost"], r["week_from"] = p["now"], round(p["now"] * factor), d.isoformat()
+                need.remove(r)
+        if not need:
+            break
 
 
 def cmd_vars(args):

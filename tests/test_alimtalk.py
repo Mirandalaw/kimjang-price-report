@@ -34,18 +34,47 @@ class TemplateVars(unittest.TestCase):
         self.assertEqual(v["#{기준일}"], "10/17(토)")
         self.assertEqual(v["#{수량4}"], "20포기")
         self.assertIn("쪽파", v["#{미조사품목}"])
-        self.assertRegex(v["#{주간비4}"], r"^[+-]?\d+%$|^-$")
+        self.assertRegex(v["#{주간비4}"], r"^[+-]\d+%$|^변동 없음$|^자료 없음$")
+        self.assertNotIn("-", [x.strip() for x in v.values()])   # '-' 한 글자 값은 없어야 한다
         self.assertRegex(v["#{다음발송일}"], r"^\d+/\d+\(월\)$")
 
     def test_signed_pct(self):
         self.assertEqual(K.signed_pct(103, 100), "+3%")
-        self.assertEqual(K.signed_pct(100.2, 100), "0%")
+        self.assertEqual(K.signed_pct(100.2, 100), "변동 없음")
         self.assertEqual(K.signed_pct(97, 100), "-3%")
-        self.assertEqual(K.signed_pct(None, 100), "-")
+        self.assertEqual(K.signed_pct(None, 100), "자료 없음")
 
     def test_next_send_day_is_next_monday(self):
         self.assertEqual(K.next_send_day(dt.date(2026, 10, 19)), "10/26(월)")   # 월요일 실행 → 다음 주 월요일
         self.assertEqual(K.next_send_day(dt.date(2026, 10, 18)), "10/19(월)")   # 일요일 → 내일
+
+
+class WeekFallback(unittest.TestCase):
+    def test_holiday_week_ago_uses_previous_business_day(self):
+        """10/16 기준인데 1주일 전(10/9 한글날) 칸이 비어 있으면 10/8 가격으로 채운다."""
+        cfg = json.loads((BASE / "items.json").read_text(encoding="utf-8"))
+        real = K.fetch_category
+
+        def fake(category, regday, fixture=None):
+            rows = real(category, regday, str(BASE / "sample"))
+            if regday == "2026-10-16":            # 기준일: 1주일 전 칸 비움
+                return [dict(r, dpr3="-") for r in rows]
+            if regday == "2026-10-09":            # 한글날: 가격 없음
+                return [dict(r, dpr1="-") for r in rows]
+            if regday == "2026-10-08":            # 직전 영업일: 당일가 = 기준일 당일가의 90%
+                return [dict(r, dpr1=str(round(K.num(r["dpr1"]) * 0.9))) if K.num(r.get("dpr1")) else r for r in rows]
+            return rows
+
+        with mock.patch.object(K, "fetch_category", fake):
+            rows = {c: K.fetch_category(c, "2026-10-16") for c in ["200", "600"]}
+            recs = K.build(cfg["items"], rows)
+            self.assertTrue(all(r.get("week") is None for r in recs if r["found"]))
+            K.fill_week(recs, cfg["items"], dt.date(2026, 10, 16), ["200", "600"])
+        got = [r for r in recs if r["found"]]
+        self.assertTrue(all(r.get("week_from") == "2026-10-08" for r in got))
+        v = K.template_vars(dt.date(2026, 10, 16), cfg, recs)
+        self.assertEqual(v["#{주간비4}"], "+11%")        # 1/0.9 - 1
+        self.assertNotEqual(v["#{주간증감}"], "자료 없음")
 
 
 class Sending(unittest.TestCase):
