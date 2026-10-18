@@ -190,12 +190,12 @@ def render(day, family, recs):
 
 # ---------- 알림톡 템플릿 변수 ----------
 def signed_pct(a, b, none="자료 없음"):
-    """'+3%' / '-2%' / '변동 없음'. 비교값이 없으면 none (알림톡에서 '-' 한 글자는 뜻이 안 보여서 말로 쓴다)."""
+    """'▲3%' / '▼2%' / '변동 없음' (오르면 ▲, 내리면 ▼ — 숫자 앞 +/- 보다 눈에 잘 띈다). 비교값이 없으면 none (알림톡에서 '-' 한 글자는 뜻이 안 보여서 말로 쓴다)."""
     p = pct(a, b)
     if p is None:
         return none
     r = round(p)
-    return "변동 없음" if r == 0 else f"{'+' if r > 0 else ''}{r}%"
+    return "변동 없음" if r == 0 else f"{'▲' if r > 0 else '▼'}{abs(r)}%"
 
 
 def next_send_day(today=None, weekday=0):

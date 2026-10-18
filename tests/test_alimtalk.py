@@ -34,14 +34,14 @@ class TemplateVars(unittest.TestCase):
         self.assertEqual(v["#{기준일}"], "10/17(토)")
         self.assertEqual(v["#{수량4}"], "20포기")
         self.assertIn("쪽파", v["#{미조사품목}"])
-        self.assertRegex(v["#{주간비4}"], r"^[+-]\d+%$|^변동 없음$|^자료 없음$")
+        self.assertRegex(v["#{주간비4}"], r"^[▲▼]\d+%$|^변동 없음$|^자료 없음$")
         self.assertNotIn("-", [x.strip() for x in v.values()])   # '-' 한 글자 값은 없어야 한다
         self.assertRegex(v["#{다음발송일}"], r"^\d+/\d+\(월\)$")
 
     def test_signed_pct(self):
-        self.assertEqual(K.signed_pct(103, 100), "+3%")
+        self.assertEqual(K.signed_pct(103, 100), "▲3%")
         self.assertEqual(K.signed_pct(100.2, 100), "변동 없음")
-        self.assertEqual(K.signed_pct(97, 100), "-3%")
+        self.assertEqual(K.signed_pct(97, 100), "▼3%")
         self.assertEqual(K.signed_pct(None, 100), "자료 없음")
 
     def test_next_send_day_is_next_monday(self):
@@ -73,7 +73,7 @@ class WeekFallback(unittest.TestCase):
         got = [r for r in recs if r["found"]]
         self.assertTrue(all(r.get("week_from") == "2026-10-08" for r in got))
         v = K.template_vars(dt.date(2026, 10, 16), cfg, recs)
-        self.assertEqual(v["#{주간비4}"], "+11%")        # 1/0.9 - 1
+        self.assertEqual(v["#{주간비4}"], "▲11%")        # 1/0.9 - 1
         self.assertNotEqual(v["#{주간증감}"], "자료 없음")
 
 
