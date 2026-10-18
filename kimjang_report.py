@@ -205,14 +205,76 @@ def next_send_day(today=None, weekday=0):
     return f"{d.month}/{d.day}({WEEKDAY[d.weekday()]})"
 
 
+def status_label(r):
+    """알림톡용 상태 한 줄. 구매 권유 없이 사실만 적는다(정보성 기준): 평년 대비 수준 + 최근 흐름.
+    예) '🟢 평년보다 낮음 · 하락 중' / '🔴 평년보다 크게 높음' / '⚪ 평년 수준'."""
+    if not r or not r.get("found"):
+        return "자료 없음"
+    vn, vw = pct(r["now"], r["normal"]), pct(r["now"], r["week"])
+    if vn is None:
+        level = "⚪ 평년 자료 없음"
+    elif vn <= -3:
+        level = "🟢 평년보다 낮음"
+    elif vn >= 10:
+        level = "🔴 평년보다 크게 높음"
+    elif vn >= 3:
+        level = "🟠 평년보다 높음"
+    else:
+        level = "⚪ 평년 수준"
+    flow = "" if vw is None else " · 하락 중" if vw <= -3 else " · 상승 중" if vw >= 3 else ""
+    return level + flow
+
+
+def status_mark(r):
+    """v5 템플릿용 한 글자 표시. 🟢 평년보다 쌈(-3% 이하) · ⚪ 평년 수준 · 🔴 평년보다 비쌈(+3% 이상) · ⚫ 자료 없음.
+    뜻은 템플릿 안의 범례 줄이 설명한다. 구매 권유 아님."""
+    if not r or not r.get("found"):
+        return "⚫"
+    vn = pct(r["now"], r["normal"])
+    if vn is None:
+        return "⚪"
+    return "🟢" if vn <= -3 else "🔴" if vn >= 3 else "⚪"
+
+
+def group_total(recs, names, key):
+    """이름 목록에 든 재료의 합계 (현재, 비교시점). 둘 다 값이 있는 재료만."""
+    rs = [r for r in recs if r["name"] in names and r["found"] and r.get(key + "_cost") is not None]
+    return sum(r["now_cost"] for r in rs), sum(r[key + "_cost"] for r in rs)
+
+
+def level_words(a, b, base="평년"):
+    """'평년보다 7% 쌈' / '평년 수준' / '평년보다 10% 비쌈' / '자료 없음'. 사실 서술만, 권유 없음 (v6 템플릿)."""
+    p = pct(a, b)
+    if p is None:
+        return "자료 없음"
+    r = round(p)
+    if abs(r) < 3:
+        return f"{base} 수준"
+    return f"{base}보다 {abs(r)}% {'비쌈' if r > 0 else '쌈'}"
+
+
+def change_words(a, b, base="지난주"):
+    """'지난주보다 3% 내림' / '지난주보다 2% 오름' / '지난주와 비슷' / '자료 없음' (v6 템플릿)."""
+    p = pct(a, b)
+    if p is None:
+        return "자료 없음"
+    r = round(p)
+    if abs(r) < 1:
+        return f"{base}와 비슷"
+    return f"{base}보다 {abs(r)}% {'오름' if r > 0 else '내림'}"
+
+
 def template_vars(day, cfg, recs):
     """카카오 알림톡 변수. 검수받은 템플릿의 #{변수} 이름과 1:1 — 빠지는 변수가 있으면 발송이 거절되므로 전부 채운다.
 
     템플릿(2026-10 검수본)
       #{기준일} #{가족기준} #{총액} #{주간증감} #{연간증감}
-      슬롯 1~3 (지금 사는 재료): #{수량n} #{금액n} #{평년비n} #{주간비n}
+      슬롯 1~3 (지금 사는 재료): #{수량n} #{금액n} #{평년비n} #{주간비n} #{상태n}(v4) #{표시n} #{연간비n}(v5)
       슬롯 4~5 (11월 재료):      #{수량n} #{금액n} #{주간비n}
       #{기타요약} #{미조사품목} #{다음발송일}
+      v5(간결형): #{채소금액} #{채소주간} #{채소연간} — later_slots+etc 재료 합계
+      v6(최소형): #{연간말} #{평년말n} #{주간말n} #{기타금액} #{기타말} — 숫자 대신 말로 ('평년보다 7% 쌈', '지난주보다 3% 내림')
+    v1~v5 어느 템플릿이든 쓸 수 있게 변수를 전부 만든다. 솔라피는 템플릿에 없는 변수를 무시한다.
     슬롯 ↔ 재료 대응은 items.json 의 alimtalk.slots(1~3) / later_slots(4~5). 가격이 없는 재료는 '가격 없음'·'자료 없음'으로 채우고 미조사품목에 이름을 적는다.
     템플릿에 없는 변수는 보내지 않는다(4~5 는 평년비 없음).
     """
@@ -233,8 +295,13 @@ def template_vars(day, cfg, recs):
             v[f"수량{n}"] = qty_text(r) if r else "-"
             v[f"금액{n}"] = won(r["now_cost"]) if found else "가격 없음"
             v[f"주간비{n}"] = signed_pct(r["now"], r["week"]) if found else "자료 없음"
+            v[f"주간말{n}"] = change_words(r["now"], r["week"]) if found else "가격 없음"
             if with_normal:
                 v[f"평년비{n}"] = signed_pct(r["now"], r["normal"]) if found else "자료 없음"
+                v[f"상태{n}"] = status_label(r)
+                v[f"표시{n}"] = status_mark(r)
+                v[f"연간비{n}"] = signed_pct(r["now"], r["year"]) if found else "자료 없음"
+                v[f"평년말{n}"] = level_words(r["now"], r["normal"]) if found else "가격 없음"
     etc = []
     for name in a.get("etc", []):
         r = by.get(name)
@@ -243,6 +310,17 @@ def template_vars(day, cfg, recs):
     v["기타요약"] = " · ".join(etc) if etc else "이번 주 가격 없음"
     missing = [r["name"] for r in recs if not r["found"]]
     v["미조사품목"] = ", ".join(missing) if missing else "없음"
+    veg = list(a.get("later_slots", {}).values()) + list(a.get("etc", []))
+    veg_now = group_total(recs, veg, "now")[0]
+    v["채소금액"] = won(veg_now) if veg_now else "자료 없음"
+    v["채소주간"] = signed_pct(*group_total(recs, veg, "week"))
+    v["채소연간"] = signed_pct(*group_total(recs, veg, "year"))
+    v["채소말"] = change_words(*group_total(recs, veg, "week"))
+    etc_names = list(a.get("etc", []))
+    etc_now = group_total(recs, etc_names, "now")[0]
+    v["기타금액"] = won(etc_now) if etc_now else "가격 없음"
+    v["기타말"] = change_words(*group_total(recs, etc_names, "week"))
+    v["연간말"] = level_words(*total(recs, "year"), base="작년")
     v["다음발송일"] = next_send_day()
     return {f"#{{{k}}}": val for k, val in v.items()}
 
