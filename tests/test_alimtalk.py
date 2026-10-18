@@ -10,9 +10,13 @@ import kimjang_report as K  # noqa: E402
 import notify  # noqa: E402
 
 TEMPLATE_VARS = ["기준일", "가족기준", "총액", "주간증감", "연간증감",
-                 "수량1", "금액1", "평년비1", "주간비1", "수량2", "금액2", "평년비2", "주간비2",
-                 "수량3", "금액3", "평년비3", "주간비3", "수량4", "금액4", "주간비4", "수량5", "금액5", "주간비5",
-                 "기타요약", "미조사품목", "다음발송일"]
+                 "수량1", "금액1", "평년비1", "주간비1", "상태1", "표시1", "연간비1",
+                 "수량2", "금액2", "평년비2", "주간비2", "상태2", "표시2", "연간비2",
+                 "수량3", "금액3", "평년비3", "주간비3", "상태3", "표시3", "연간비3",
+                 "수량4", "금액4", "주간비4", "수량5", "금액5", "주간비5",
+                 "평년말1", "평년말2", "평년말3", "주간말1", "주간말2", "주간말3", "주간말4", "주간말5",
+                 "연간말", "채소말", "기타금액", "기타말",
+                 "기타요약", "미조사품목", "채소금액", "채소주간", "채소연간", "다음발송일"]
 
 
 def _sample():
@@ -37,6 +41,40 @@ class TemplateVars(unittest.TestCase):
         self.assertRegex(v["#{주간비4}"], r"^[▲▼]\d+%$|^변동 없음$|^자료 없음$")
         self.assertNotIn("-", [x.strip() for x in v.values()])   # '-' 한 글자 값은 없어야 한다
         self.assertRegex(v["#{다음발송일}"], r"^\d+/\d+\(월\)$")
+
+    def test_status_label_is_factual_not_a_buy_prompt(self):
+        rec = lambda now, week, normal: {"found": True, "now": now, "week": week, "normal": normal}
+        self.assertEqual(K.status_label(rec(95, 99, 100)), "🟢 평년보다 낮음 · 하락 중")
+        self.assertEqual(K.status_label(rec(112, 112, 100)), "🔴 평년보다 크게 높음")
+        self.assertEqual(K.status_label(rec(105, 100, 100)), "🟠 평년보다 높음 · 상승 중")
+        self.assertEqual(K.status_label(rec(100, 100, 100)), "⚪ 평년 수준")
+        self.assertEqual(K.status_label(rec(100, 100, None)), "⚪ 평년 자료 없음")
+        self.assertEqual(K.status_label({"found": False}), "자료 없음")
+        for lbl in (K.status_label(rec(95, 99, 100)), K.status_label(rec(112, 112, 100))):
+            self.assertNotIn("사", lbl)   # '사세요/사도' 같은 권유 없음
+
+    def test_status_mark_v5(self):
+        rec = lambda now, normal: {"found": True, "now": now, "week": now, "normal": normal}
+        self.assertEqual(K.status_mark(rec(95, 100)), "🟢")
+        self.assertEqual(K.status_mark(rec(100, 100)), "⚪")
+        self.assertEqual(K.status_mark(rec(105, 100)), "🔴")
+        self.assertEqual(K.status_mark(rec(100, None)), "⚪")
+        self.assertEqual(K.status_mark({"found": False}), "⚫")
+
+    def test_v5_vegetable_group(self):
+        cfg, day, recs = _sample()
+        v = K.template_vars(day, cfg, recs)
+        self.assertRegex(v["#{채소금액}"], r"(만원|원)$")
+        self.assertRegex(v["#{채소주간}"], r"^[▲▼]\d+%$|^변동 없음$|^자료 없음$")
+
+    def test_v6_words(self):
+        self.assertEqual(K.level_words(93, 100), "평년보다 7% 쌈")
+        self.assertEqual(K.level_words(101, 100), "평년 수준")
+        self.assertEqual(K.level_words(110, 100), "평년보다 10% 비쌈")
+        self.assertEqual(K.level_words(94, 100, base="작년"), "작년보다 6% 쌈")
+        self.assertEqual(K.level_words(None, 100), "자료 없음")
+        self.assertEqual(K.change_words(97, 100), "지난주보다 3% 내림")
+        self.assertEqual(K.change_words(100.4, 100), "지난주와 비슷")
 
     def test_signed_pct(self):
         self.assertEqual(K.signed_pct(103, 100), "▲3%")
