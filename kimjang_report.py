@@ -6,10 +6,11 @@
   python kimjang_report.py report             # 리포트 생성 + 로그 저장
   python kimjang_report.py report --date 2026-09-28
   python kimjang_report.py report --fixture sample   # 인터넷 없이 샘플로 시험
+  python kimjang_report.py vars --fixture sample     # 알림톡 템플릿 변수만 출력 (템플릿 검수·확인용)
 
 환경변수
   KAMIS_CERT_KEY, KAMIS_CERT_ID   (필수, 인증키와 KAMIS 회원 아이디)
-  발송 채널 설정은 notify.py 참고 (문자·메일·텔레그램, 없으면 저장만)
+  발송 채널 설정은 notify.py 참고 (알림톡·문자·메일·텔레그램, 없으면 저장만)
 표준 라이브러리만 쓴다.
 """
 import argparse, csv, datetime as dt, json, os, re, sys, time
@@ -187,6 +188,66 @@ def render(day, family, recs):
     return "\n".join(lines)
 
 
+# ---------- 알림톡 템플릿 변수 ----------
+def signed_pct(a, b, none="-"):
+    """'+3%' / '-2%' / '0%'. 비교값이 없으면 none."""
+    p = pct(a, b)
+    if p is None:
+        return none
+    r = round(p)
+    return "0%" if r == 0 else f"{'+' if r > 0 else ''}{r}%"
+
+
+def next_send_day(today=None, weekday=0):
+    """다음 발송일(기본: 다음 주 월요일) → '10/20(월)'."""
+    today = today or dt.date.today()
+    d = today + dt.timedelta(days=(weekday - today.weekday() - 1) % 7 + 1)
+    return f"{d.month}/{d.day}({WEEKDAY[d.weekday()]})"
+
+
+def template_vars(day, cfg, recs):
+    """카카오 알림톡 변수. 검수받은 템플릿의 #{변수} 이름과 1:1 — 빠지는 변수가 있으면 발송이 거절되므로 전부 채운다.
+
+    템플릿(2026-10 검수본)
+      #{기준일} #{가족기준} #{총액} #{주간증감} #{연간증감}
+      슬롯 1~3 (지금 사는 재료): #{수량n} #{금액n} #{평년비n} #{주간비n}
+      슬롯 4~5 (11월 재료):      #{수량n} #{금액n} #{주간비n}
+      #{기타요약} #{미조사품목} #{다음발송일}
+    슬롯 ↔ 재료 대응은 items.json 의 alimtalk.slots(1~3) / later_slots(4~5). 가격이 없는 재료는 '-' 로 채우고 미조사품목에 이름을 적는다.
+    템플릿에 없는 변수는 보내지 않는다(4~5 는 평년비 없음).
+    """
+    by = {r["name"]: r for r in recs}
+    a = cfg.get("alimtalk", {})
+    ok = [r for r in recs if r["found"]]
+    v = {
+        "기준일": f"{day.month}/{day.day}({WEEKDAY[day.weekday()]})",
+        "가족기준": cfg.get("family", ""),
+        "총액": won(sum(r["now_cost"] for r in ok)) if ok else "-",
+        "주간증감": signed_pct(*total(recs, "week")),
+        "연간증감": signed_pct(*total(recs, "year")),
+    }
+    for slots, with_normal in ((a.get("slots", {}), True), (a.get("later_slots", {}), False)):
+        for n, name in slots.items():
+            r = by.get(name)
+            found = r is not None and r["found"]
+            v[f"수량{n}"] = qty_text(r) if r else "-"
+            v[f"금액{n}"] = won(r["now_cost"]) if found else "-"
+            v[f"주간비{n}"] = signed_pct(r["now"], r["week"]) if found else "-"
+            if with_normal:
+                v[f"평년비{n}"] = signed_pct(r["now"], r["normal"]) if found else "-"
+    etc = []
+    for name in a.get("etc", []):
+        r = by.get(name)
+        if r and r["found"]:
+            t = signed_pct(r["now"], r["week"])
+            etc.append(f"{name} {won(r['now_cost'])}" + (f"({t})" if t != "-" else ""))
+    v["기타요약"] = " · ".join(etc) if etc else "이번 주 가격 없음"
+    missing = [r["name"] for r in recs if not r["found"]]
+    v["미조사품목"] = ", ".join(missing) if missing else "없음"
+    v["다음발송일"] = next_send_day()
+    return {f"#{{{k}}}": val for k, val in v.items()}
+
+
 # ---------- 저장·발송 ----------
 def save(day, recs, msg, outdir):
     (outdir / "logs").mkdir(parents=True, exist_ok=True)
@@ -219,14 +280,25 @@ def cmd_codes(args):
             print(f"{r.get('item_name')} | {r.get('kind_name')} | {r.get('rank')} | {r.get('unit')} | 당일 {r.get('dpr1')}")
 
 
-def cmd_report(args):
+def _collect(args):
     cfg = json.loads((BASE / "items.json").read_text(encoding="utf-8"))
     cats = sorted({i["category"] for i in cfg["items"]})
     day = dt.date.fromisoformat(args.date) if args.date else dt.date.today()
     half = len(cfg["items"]) / 2
     enough = lambda rows: sum(1 for r in build(cfg["items"], rows) if r["found"]) >= half
     day, rows = latest_business_day(day, cats, args.fixture, ok=enough)
-    recs = build(cfg["items"], rows)
+    return cfg, day, build(cfg["items"], rows)
+
+
+def cmd_vars(args):
+    """알림톡 변수를 그대로 출력한다. 솔라피 템플릿 테스트 발송 화면에 붙여 넣어 확인할 때 쓴다."""
+    cfg, day, recs = _collect(args)
+    for k, v in template_vars(day, cfg, recs).items():
+        print(f"{k:14s} {v}")
+
+
+def cmd_report(args):
+    cfg, day, recs = _collect(args)
     msg = render(day, cfg.get("family", ""), recs)
     save(day, recs, msg, Path(args.out))
     print(msg)
@@ -239,19 +311,19 @@ def cmd_report(args):
               f"`python3 kimjang_report.py codes` 결과와 items.json을 맞추세요.", file=sys.stderr)
         return
     if not args.no_send:
-        for r in notify.send_all(msg, f"김장 물가 알리미 {day}"):
+        for r in notify.send_all(msg, f"김장 물가 알리미 {day}", variables=template_vars(day, cfg, recs)):
             print(r, file=sys.stderr)
 
 
 def main():
     p = argparse.ArgumentParser(description="김장 물가 알리미")
-    p.add_argument("command", choices=["codes", "report"])
+    p.add_argument("command", choices=["codes", "report", "vars"])
     p.add_argument("--date", help="기준일 YYYY-MM-DD (기본: 오늘, 주말이면 직전 평일)")
     p.add_argument("--fixture", help="샘플 JSON 폴더 (인터넷 없이 시험)")
     p.add_argument("--out", default=str(BASE / "data"), help="로그 저장 폴더")
     p.add_argument("--no-send", action="store_true", help="저장만 하고 발송하지 않음")
     a = p.parse_args()
-    cmd_codes(a) if a.command == "codes" else cmd_report(a)
+    {"codes": cmd_codes, "report": cmd_report, "vars": cmd_vars}[a.command](a)
 
 
 if __name__ == "__main__":
